@@ -1,12 +1,14 @@
 import com.intel.analytics.bigdl.Module
 import com.intel.analytics.bigdl.dataset.Sample
-import com.intel.analytics.bigdl.optim._
+import com.intel.analytics.bigdl.nn.ClassNLLCriterion
+import com.intel.analytics.zoo.pipeline.api.keras.models.{KerasNet, Sequential}
 import com.intel.analytics.zoo.pipeline.api.keras.layers._
-import com.intel.analytics.zoo.pipeline.api.keras.models.Sequential
+
+import com.intel.analytics.bigdl.utils.Shape
+import com.intel.analytics.bigdl.optim._
 import com.intel.analytics.zoo.pipeline.api.keras.objectives.SparseCategoricalCrossEntropy
 import org.apache.spark.rdd.RDD
-
-/**
+ /**
   * Created by luyangwang on Dec, 2018
   *
   */
@@ -21,7 +23,6 @@ class KerasRNN {
     val model = Sequential[Float]()
 
     model.add(Embedding[Float](skuCount + 1, embedOutDim, init = "normal", inputLength = maxLength))
-      .add(GRU[Float](200, returnSequences = true))
       .add(GRU[Float](200, returnSequences = false))
       .add(Dense[Float](numClasses, activation = "log_softmax"))
     model
@@ -40,19 +41,20 @@ class KerasRNN {
     val split = train.randomSplit(Array(0.8, 0.2), 100)
     val trainRDD = split(0)
     val testRDD = split(1)
-
-    model.summary()
-    println("trainRDD count = " + trainRDD.count())
-
     val optimizer = Optimizer(
       model = model,
       sampleRDD = trainRDD,
+//      criterion = new SparseCategoricalCrossEntropy[Float](zeroBasedLabel = false),
       criterion = new SparseCategoricalCrossEntropy[Float](logProbAsInput = true, zeroBasedLabel = false),
       batchSize = batchSize
     )
 
     val trained_model = optimizer
       .setOptimMethod(new RMSprop[Float]())
+//      .setOptimMethod(new Adagrad[Float]())
+//      .setTrainSummary(new TrainSummary(logDir, "recRNNTrainingSum"))
+//      .setValidationSummary(new ValidationSummary(logDir, "recRNNValidationSum"))
+//      .setCheckpoint(modelPath, Trigger.everyEpoch)
       .setValidation(Trigger.everyEpoch, testRDD, Array(new Top5Accuracy[Float]()), batchSize)
       .setEndWhen(Trigger.maxEpoch(maxEpoch))
       .optimize()

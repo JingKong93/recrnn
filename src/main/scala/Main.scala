@@ -2,8 +2,8 @@ import java.io.File
 import java.nio.file.Paths
 
 import com.amazonaws.auth.DefaultAWSCredentialsProviderChain
-import com.amazonaws.regions.Regions
 import com.amazonaws.services.s3.AmazonS3ClientBuilder
+import com.amazonaws.services.s3.model.PutObjectResult
 import com.intel.analytics.bigdl.dataset.Sample
 import com.intel.analytics.bigdl.tensor.Tensor
 import com.intel.analytics.bigdl.utils.T
@@ -41,49 +41,51 @@ case class ModelParams(
 object Main{
 
   private val s3client = AmazonS3ClientBuilder.standard()
-    .withRegion(Regions.CN_NORTH_1)
+//    .withRegion(Regions.CN_NORTH_1)
     .withCredentials(new DefaultAWSCredentialsProviderChain())
     .build()
-  val currentDir: String = Paths.get(".").toAbsolutePath + "/"
 
   def main(args: Array[String]): Unit = {
 
     Logger.getLogger("org").setLevel(Level.WARN)
 
-    System.setProperty("log4j.appender.NotConsole","org.apache.log4j.RollingFileAppender")
-    System.setProperty("log4j.appender.NotConsole.fileName","./model.log")
-    System.setProperty("log4j.appender.NotConsole.maxFileSize","20MB")
-
     val params = ModelParams(
-      maxLength = 10,
-      maxEpoch = 10,
-      batchSize = 1280,
+      maxLength = 20,
+      maxEpoch = 50,
+      batchSize = 126400,
       embedOutDim = 200,
-      inputDir = "./modelFiles/",
-      logDir = "./log/",
-      dataName = "recrnn.csv",
+//      inputDir = "./modelFiles/",
+      inputDir = "s3://ecomdatascience/RecRNN/",
+//      logDir = "./log/",
+      logDir = "s3://ecomdatascience/RecRNN/",
+//      dataName = "rnn20190102.csv",
+      dataName = "rnn3M.csv",
       stringIndexerName = "skuIndexer",
-      rnnName = "rnnModel"
+      rnnName = "rnnModel_2"
     )
 
     /*Construct BigDL session*/
     val conf = new SparkConf()
       .setAppName("recRNN")
-      .setMaster("local[*]")
-      .set("spark.driver.memory", "100g")
+//      .setMaster("local[*]")
+//      .set("spark.driver.memory", "100g")
     val sc = NNContext.initNNContext(conf)
     val spark = SparkSession.builder().config(sc.getConf).getOrCreate()
 
-    /*StringIndex SKU number*/
-    val data = spark.read.options(Map("header" -> "true", "delimiter" -> "|")).csv(params.inputDir + params.dataName)
 
-    val skuCount = data.select("SKU_NUM").distinct().count().toInt
+    /*StringIndex SKU number*/
+    val data = spark.read.options(Map("header" -> "true", "delimiter" -> ",")).csv(params.inputDir + "data/*.csv")
+//     val data = getData(params.inputDir+"data/")
+    data.printSchema()
+    val skuCount = data.select("ViewSKU").distinct().count().toInt
     println(skuCount)
-    val skuIndexer = new StringIndexer().setInputCol("SKU_NUM").setOutputCol("SKU_INDEX").setHandleInvalid("keep")
+    println(data.count())
+    val skuIndexer = new StringIndexer().setInputCol("ViewSKU").setOutputCol("SKU_INDEX").setHandleInvalid("keep")
     val skuIndexerModel = skuIndexer.fit(data)
     skuIndexerModel.write.overwrite().save(params.inputDir + params.stringIndexerName)
-    saveToMleap(skuIndexerModel, data, params.stringIndexerName)
-    println("SkuIndexerModel has been saved")
+
+//    saveToMleap(skuIndexerModel, data, params.inputDir + params.stringIndexerName)
+//    println("SkuIndexerModel has been saved")
 
     /*StringIndex the sku number and adjust the starting index to 1*/
     val data1 = skuIndexerModel
@@ -94,7 +96,7 @@ object Main{
     data1.printSchema()
 
     /*Collect item to sequence*/
-    val data2 = data1.groupBy("SESSION_ID")
+    val data2 = data1.groupBy("sessionId")
       .agg(collect_list("SKU_INDEX").alias("sku"))
       .filter(col("sku").isNotNull)
 
@@ -121,7 +123,7 @@ object Main{
       .withColumn("features", prePaddingUDF(col("sku")))
       .withColumn("label", getLabelUDF(col("sku")))
 
-    data3.show(false)
+    data3.show()
     data3.printSchema()
 
 
@@ -157,8 +159,10 @@ object Main{
                  ): Unit = {
     val pipeline = SparkUtil.createPipelineModel(uid = "pipeline", Array(indexerModel))
     val sbc = SparkBundleContext().withDataset(pipeline.transform(data))
-    new File(s"$currentDir$indexerModelPath.zip").delete()
-    for(bf <- managed(BundleFile(s"jar:file:$currentDir$indexerModelPath.zip"))) {
+    val currentDir = Paths.get(".").toAbsolutePath
+
+    new File(s"$currentDir/$indexerModelPath.zip").delete()
+    for(bf <- managed(BundleFile(s"jar:file:$currentDir/$indexerModelPath.zip"))) {
       pipeline.writeBundle.save(bf)(sbc).get
     }
   }
@@ -167,10 +171,9 @@ object Main{
                 bucketName: String,
                 fileKey: String,
                 filePath: String
-              ): Unit = {
+              ): PutObjectResult = {
     val file = new File(filePath)
     s3client.putObject(bucketName, fileKey, file)
-    println(s"$filePath has been uploaded to s3 at $bucketName$fileKey")
   }
 
 }

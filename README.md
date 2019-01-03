@@ -12,11 +12,6 @@ libraryDependencies ++= Seq(
   "org.apache.spark" %% "spark-sql" % sparkVersion
 )
 libraryDependencies += "com.intel.analytics.zoo" % "analytics-zoo-bigdl_0.7.1-spark_2.3.1" % analyticsZooVersion
-libraryDependencies += "ml.combust.mleap" %% "mleap-spark" % "0.12.0"
-libraryDependencies += "ml.combust.mleap" %% "mleap-spark-extension" % "0.12.0"
-libraryDependencies += "com.amazonaws" % "aws-java-sdk" % "1.11.354"
-libraryDependencies += "org.scalactic" %% "scalactic" % "3.0.5"
-libraryDependencies += "org.scalatest" %% "scalatest" % "3.0.5" % "test"
 ```
 
 ## How to use
@@ -36,16 +31,9 @@ Run model on your own data by replacing below value, if leave them blank model w
 ```
 Package code to one jar and run as spark job
 ```scala
-sbt -J-Xmx2G assembly
+export SBT_OPTS="-Xmx2G -XX:+UseConcMarkSweepGC -XX:+CMSClassUnloadingEnabled -XX:MaxPermSize=2G -Xss2M  -Duser.timezone=GMT"
+sbt assembly
 spark-submit --class Main ${location of assembled jar}
-```
-If you need to save the output file to AWS S3 bucket, simply change inputDir to your S3 path add below code to upload stringIndexerMleap model to your bucket, see below example
-```scala
-putS3Obj(
-      bucketName = "your bucketName",
-      fileKey = "path to your folder",
-      filePath = currentDir + params.stringIndexerName + ".zip"
-    )
 ```
 
 ## Contact & Feedback
